@@ -1,0 +1,4 @@
+#!/bin/bash
+
+docker pull ubuntu:jammy
+docker run --entrypoint "bash" -it --volume=$PWD:/src --workdir=/src ubuntu:jammy /src/script/make-iso

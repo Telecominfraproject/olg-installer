@@ -1,0 +1,36 @@
+#!/bin/bash
+
+if [ ! -e /.dockerenv ]; then
+  echo "You must run ./build to make the ISO"
+  exit 99
+fi
+
+sourceISO="ubuntu-24.04.3-live-server-amd64.iso"
+sourceISOURL="https://mirror.xenyth.net/ubuntu-releases/24.04.3/${sourceISO}"
+isoVersion=`cat grub.cfg| grep "^ISO_VERSION" | cut -f 2 -d '"'`
+targetISO="olg-${isoVersion}.iso"
+
+apt update
+apt -y install wget xorriso curl gpg fdisk git
+
+# Remove any previous ISO
+rm -f ${targetISO}
+
+# If the source ISO is missing get it
+if [ ! -e ${sourceISO} ]; then
+  wget ${sourceISOURL}
+  if [ ! -e ${sourceISO} ]; then
+    echo "Missing ${sourceISO}"
+    exit 1
+  fi
+fi
+
+# Build out custom ISO
+script/ubuntu-autoinstall-generator.sh -a -u user-data -d ${targetISO} -s ${sourceISO} --no-verify --all-in-one
+chmod 777 ${targetISO}
+
+# Remove artifacts
+rm -f iso-files/firstboot
+rm -f iso-files/*.deb
+rm -f *-efi.img
+rm -f *-hybrid.img

@@ -1,0 +1,14 @@
+.vagrant
+*.iso
+box/
+output-*/
+manifest.json
+files/iso_release
+images/efiboot.img
+*.swp
+kickstart/devops_packages.cfg
+*packages.yml
+*.zip
+.DS_Store
+loop
+firstboot/firstboot
