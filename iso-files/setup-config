@@ -1,0 +1,8 @@
+VCPUS="4"
+RAM_MB="16384"
+DISK_GB="50"
+WAN_IF="enp2s0f0np0"
+LAN_IF="enp2s0f1np1"
+ADMIN_IF="enx000ec6f01419"
+INTEL_AMT_PORT="enp88s0"
+ISO_URL="https://github.com/vyos/vyos-nightly-build/releases/download/2025.12.13-0020-rolling/vyos-2025.12.13-0020-rolling-generic-amd64.iso"

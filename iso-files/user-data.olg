@@ -1,0 +1,25 @@
+#cloud-config
+  version: 1
+  identity:
+    hostname: olg-staging
+    password: "$y$j9T$Ogm02oaDNP6IIEhxrdLE21$vOQzeg.eQ7PYd0NsBxGhimAQNM6qYo41PIsVratZaV2"
+    username: olgadm
+  package_update: false
+  package_upgrade: false
+  ssh:
+      allow-pw: false
+      authorized-keys:
+        - ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEAqf+y26ldt63J9/ZfskTrwy9AU5ZXJkDzWYH5rDisZRc5JZ8Bn9Uj2KV0k7j6XLyQP8N6anoUepxaVuA0eqOSbpSgX5pgg2qCqPy0bbIbpPrEn0XESvds7+0hY2ekPHlL6uawoICkUskLo6MKC/69lFaeIrkC5li4omYUzzZhN5wpdk65UUM12z71HycF7sg2RHBmJSKtjrZGFdIZFVk1zj3OmOwk52GLdv4rJ+DPtrnhlvaJqqSTT4aWRJTpkGwRrzLeDVr2JoQ6QY1PPOtrrl2bxmvlmPbrA/Up4SpnE+0ZlMk7Td5qnfP1JQmRA4yHgwuWra8IUNVPNN+0qKXGaw== andre.courchesne@intello.com
+      install-server: true
+  late-commands:
+    - echo "Open LAN Gateway (Installed using ISO {{ ISO_VERSION }})" >/target/root/olg_release
+    - mkdir /target/opt/staging_scripts
+    - cp -r /cdrom/olg_files/* /target/opt/staging_scripts
+    - chmod -R +x /target/opt/staging_scripts/*
+    - cat /target/opt/staging_scripts/admin-bashrc-additions >> /target/etc/bash.bashrc
+    - echo 'olgadm ALL=(ALL) NOPASSWD:ALL' > /target/etc/sudoers.d/olgadm
+    - curtin in-target --target /target systemctl disable cloud-init
+    - curtin in-target --target /target /opt/staging_scripts/set-hostname >>/target/root/set-hostname.log
+    - cp /target/opt/staging_scripts/01-dhcp-host-admin.yaml /target/etc/netplan/01-dhcp-host-admin.yaml
+    # shut-down the host to avoid an infinite installer loop
+    - shutdown -h now

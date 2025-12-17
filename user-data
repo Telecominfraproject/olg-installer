@@ -1,0 +1,7 @@
+#cloud-config
+autoinstall:
+  version: 1
+  refresh-installer:
+    update: yes
+  early-commands:
+    - cp /cdrom/olg_files/user-data.olg /autoinstall.yaml

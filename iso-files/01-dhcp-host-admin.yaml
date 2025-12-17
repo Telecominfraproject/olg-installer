@@ -1,0 +1,6 @@
+network:
+  version: 2
+  ethernets:
+    {{ HOST_ADMIN_PORT }}: # Admin port
+      dhcp4: true
+      dhcp6: false

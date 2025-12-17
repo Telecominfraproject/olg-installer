@@ -1,0 +1,60 @@
+#!/bin/bash
+
+echo " * Starting : set_hostname"
+
+if [ ! -e /tmp/previous_install_hostname ]; then
+  serial=`cat /sys/class/dmi/id/product_serial | tr '[:upper:]' '[:lower:]'`
+  product_name=`cat /sys/class/dmi/id/product_name`
+  if [ "$product_name" == "Default string" ] || [ "$product_name" == "" ]; then
+    product_name=`cat /sys/class/dmi/id/board_name`
+  fi
+  if [ "$serial" == "0" ]; then
+    hostname="olg-vbox-$RANDOM"
+  elif [ "$product_name" == "FW4A" ] || [ "$product_name" == "FW4B" ] || [ "$product_name" == "Aptio CRB" ]; then
+    unique_id=`cat /sys/class/net/enp1s0/address  | sed 's/://g'`
+    hostname="olg-$unique_id"
+  elif [ "$product_name" == "VP2410" ]; then
+    unique_id=`cat /sys/class/net/enp2s0/address  | sed 's/://g'`
+    hostname="olg-$unique_id"
+  elif [ "$serial" == "" ] || [ "$serial" == "default string" ]; then
+    macaddress=`cat /sys/class/net/*/address | grep -v "00:00:00:00:00:00" | sort |head -n 1`
+    if [ "${macaddress}" != "" ]; then
+      unique_id=`echo ${macaddress} | sed 's/://g'`
+      hostname="olg-$unique_id"
+    else
+      hostname="olg-unknown-$RANDOM"
+    fi
+  elif [ "$product_name" == "VMware Virtual Platform" ]; then
+    if [ -e /sys/class/net/eth1/address ]; then
+      unique_id=`cat /sys/class/net/eth1/address  | sed 's/://g'`
+      hostname="olg-vmware-$unique_id"
+    elif [ -e /sys/class/net/ens33/address ]; then
+      unique_id=`cat /sys/class/net/ens33/address  | sed 's/://g'`
+      hostname="olg-vmware-$unique_id"
+    elif [ -e /sys/class/net/ens192/address ]; then
+      unique_id=`cat /sys/class/net/ens192/address  | sed 's/://g'`
+      hostname="olg-vmware-$unique_id"
+    else
+      hostname="olg-vmware-$RANDOM"
+    fi
+  else
+    ipmi_mac=`ipmitool lan print | grep "MAC Address" | awk '{print $4}' | sed 's/://g'`
+    if [ ! -z ${ipmi_mac} ]; then
+      hostname="olg-$ipmi_mac"
+    else
+      hostname="olg-$serial"
+    fi
+  fi
+else
+  hostname=`cat /tmp/previous_install_hostname`
+fi
+
+# Remove any spaces
+hostname=${hostname//[[:blank:]]/}
+
+hostnamectl set-hostname ${hostname}
+echo "Product name : '$product_name'"
+echo "DMI Serial   : '$serial'"
+echo "Got hostname : '$hostname'"
+echo "network --hostname='$hostname'"
+echo " * Done : set-hostname"

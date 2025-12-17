@@ -1,0 +1,62 @@
+set interfaces ethernet eth0 address 'dhcp'
+set interfaces ethernet eth0 description 'WAN'
+set interfaces ethernet eth0 offload gro
+set interfaces ethernet eth0 offload gso
+set interfaces ethernet eth0 offload sg
+set interfaces ethernet eth0 offload tso
+set interfaces ethernet eth1 description 'LAN'
+set interfaces ethernet eth1 offload gro
+set interfaces ethernet eth1 offload gso
+set interfaces ethernet eth1 offload sg
+set interfaces ethernet eth1 offload tso
+set interfaces ethernet eth1 vif 100 address '192.168.100.1/24'
+set interfaces ethernet eth1 vif 100 description 'LAN VLAN 100 (Switches)'
+set interfaces ethernet eth1 vif 101 address '192.168.101.1/24'
+set interfaces ethernet eth1 vif 101 description 'LAN VLAN 101 (APs)'
+set interfaces ethernet eth1 vif 1000 address '172.20.0.1/20'
+set interfaces ethernet eth1 vif 1000 description 'LAN VLAN 1000 (Guest devices)'
+set interfaces loopback lo
+set nat source rule 100 description 'NAT out WAN'
+set nat source rule 100 outbound-interface name 'eth0'
+set nat source rule 100 source address '172.20.0.0/20'
+set nat source rule 100 translation address 'masquerade'
+set service dhcp-server shared-network-name VLAN100 authoritative
+set service dhcp-server shared-network-name VLAN100 subnet 192.168.100.0/24 option default-router '192.168.100.1'
+set service dhcp-server shared-network-name VLAN100 subnet 192.168.100.0/24 option name-server '192.168.100.1'
+set service dhcp-server shared-network-name VLAN100 subnet 192.168.100.0/24 range 0 start '192.168.100.50'
+set service dhcp-server shared-network-name VLAN100 subnet 192.168.100.0/24 range 0 stop '192.168.100.200'
+set service dhcp-server shared-network-name VLAN100 subnet 192.168.100.0/24 subnet-id '100'
+set service dhcp-server shared-network-name VLAN101 authoritative
+set service dhcp-server shared-network-name VLAN101 subnet 192.168.101.0/24 option default-router '192.168.101.1'
+set service dhcp-server shared-network-name VLAN101 subnet 192.168.101.0/24 option domain-name 'lan101.local'
+set service dhcp-server shared-network-name VLAN101 subnet 192.168.101.0/24 option name-server '192.168.101.1'
+set service dhcp-server shared-network-name VLAN101 subnet 192.168.101.0/24 range 0 start '192.168.101.50'
+set service dhcp-server shared-network-name VLAN101 subnet 192.168.101.0/24 range 0 stop '192.168.101.200'
+set service dhcp-server shared-network-name VLAN101 subnet 192.168.101.0/24 subnet-id '101'
+set service dhcp-server shared-network-name VLAN1000 authoritative
+set service dhcp-server shared-network-name VLAN1000 subnet 172.20.0.0/20 option default-router '172.20.0.1'
+set service dhcp-server shared-network-name VLAN1000 subnet 172.20.0.0/20 option domain-name 'lan200.local'
+set service dhcp-server shared-network-name VLAN1000 subnet 172.20.0.0/20 option name-server '172.20.0.1'
+set service dhcp-server shared-network-name VLAN1000 subnet 172.20.0.0/20 range 0 start '172.20.0.50'
+set service dhcp-server shared-network-name VLAN1000 subnet 172.20.0.0/20 range 0 stop '172.20.15.200'
+set service dhcp-server shared-network-name VLAN1000 subnet 172.20.0.0/20 subnet-id '1000'
+set service dns forwarding allow-from '192.168.100.0/24'
+set service dns forwarding allow-from '192.168.101.0/24'
+set service dns forwarding allow-from '172.20.0.0/20'
+set service dns forwarding listen-address '192.168.100.1'
+set service dns forwarding listen-address '192.168.101.1'
+set service dns forwarding listen-address '172.20.0.1'
+set service dns forwarding name-server 1.1.1.1
+set service dns forwarding name-server 9.9.9.9
+set service ntp allow-client address '127.0.0.0/8'
+set service ntp allow-client address '169.254.0.0/16'
+set service ntp allow-client address '10.0.0.0/8'
+set service ntp allow-client address '172.16.0.0/12'
+set service ntp allow-client address '192.168.0.0/16'
+set service ntp allow-client address '::1/128'
+set service ntp allow-client address 'fe80::/10'
+set service ntp allow-client address 'fc00::/7'
+set service ntp server time1.vyos.net
+set service ntp server time2.vyos.net
+set service ntp server time3.vyos.net
+set service ssh port 22
