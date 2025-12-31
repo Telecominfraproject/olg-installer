@@ -1,0 +1,130 @@
+{
+    "interfaces": [
+        {
+            "ethernet": [
+                {
+                    "select-ports": [
+                        "WAN*"
+                    ]
+                }
+            ],
+            "ipv4": {
+                "addressing": "dynamic"
+            },
+            "name": "WAN",
+            "role": "upstream",
+            "services": [
+                "ssh"
+            ]
+        },
+        {
+            "ethernet": [
+                {
+                    "select-ports": [
+                        "LAN*"
+                    ]
+                }
+            ],
+            "ipv4": {
+                "addressing": "static",
+                "dhcp": {
+                    "lease-count": 128,
+                    "lease-first": 10,
+                    "lease-time": "6h"
+                },
+                "gateway": "192.168.60.1",
+                "send-hostname": true,
+                "subnet": "192.168.60.1/24"
+            },
+            "name": "LAN",
+            "role": "downstream",
+            "services": [
+                "ssh"
+            ]
+        },
+        {
+            "ethernet": [
+                {
+                    "isolate": false,
+                    "learning": true,
+                    "multicast": true,
+                    "reverse-path": false,
+                    "select-ports": [
+                        "LAN2"
+                    ],
+                    "vlan-tag": "auto"
+                }
+            ],
+            "ipv4": {
+                "addressing": "static",
+                "dhcp": {
+                    "lease-count": 128,
+                    "lease-first": 10,
+                    "lease-time": "6h"
+                },
+                "gateway": "192.168.10.1",
+                "send-hostname": true,
+                "subnet": "192.168.10.1/24"
+            },
+            "name": "LAN.10",
+            "role": "downstream",
+            "vlan": {
+                "id": 10
+            }
+        },
+        {
+            "ethernet": [
+                {
+                    "isolate": false,
+                    "learning": true,
+                    "multicast": true,
+                    "reverse-path": false,
+                    "select-ports": [
+                        "LAN1"
+                    ],
+                    "vlan-tag": "auto"
+                }
+            ],
+            "ipv4": {
+                "addressing": "static",
+                "dhcp": {
+                    "lease-count": 128,
+                    "lease-first": 10,
+                    "lease-time": "6h"
+                },
+                "gateway": "192.168.20.1",
+                "send-hostname": true,
+                "subnet": "192.168.20.1/24"
+            },
+            "name": "LAN.20",
+            "role": "downstream",
+            "vlan": {
+                "id": 20
+            }
+        }
+    ],
+    "nat": {
+        "source": {
+            "rule": {
+                "100": {
+                    "description": "LAN SNAT",
+                    "outbound-interface": {
+                        "name": "br0"
+                    },
+                    "source": {
+                        "address": "192.168.60.0/24"
+                    },
+                    "translation": {
+                        "address": "masquerade"
+                    }
+                }
+            }
+        }
+    },
+    "services": {
+        "ssh": {
+            "port": 22
+        }
+    },
+    "uuid": 1770703498
+}

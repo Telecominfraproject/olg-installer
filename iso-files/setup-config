@@ -5,4 +5,13 @@ WAN_IF="enp2s0f0np0"
 LAN_IF="enp2s0f1np1"
 ADMIN_IF="enx000ec6f01419"
 INTEL_AMT_PORT="enp88s0"
-ISO_URL="https://github.com/vyos/vyos-nightly-build/releases/download/2025.12.13-0020-rolling/vyos-2025.12.13-0020-rolling-generic-amd64.iso"
+OLG_ISO_PLATFORM="VM"   # BAREMETAL or VM
+
+# RouterArchitects ISO (for OpenWifi Cloud SDK mode)
+ISO_URL="'https://drive.usercontent.google.com/download?id=14W0hnFhM64b8_jn1CwDWiPybntIrBzlh&confirm=t&uuid=e9d7cc8d-0a8d-483f-a650-af5ca22ace15&at=APcXIO18cq3_AFU_XdJgtU1JXTyd%3A1770305061284'"
+ISO_SHA256="3d6ad7bc5b5f51566cf8353cf231c395390a509588c4c855a7bd37df275d104e"
+
+# VyOS official ISO (for stand-alone mode)
+#ISO_URL="'https://github.com/vyos/vyos-nightly-build/releases/download/2026.02.03-0027-rolling/vyos-2026.02.03-0027-rolling-generic-amd64.iso'"
+#ISO_SHA256="26ed11122794d4e3a457abfbdc54bd77996966e0d7e714bf4c8f66a16f0a6673"
+

@@ -13,6 +13,13 @@ DISK_PATH="$IMAGES_DIR/${VM_NAME}.qcow2"
 BR_WAN="br-wan"
 BR_LAN="br-lan"
 NETPLAN_FILE="/etc/netplan/99-vyos-bridges.yaml"
+# Default: no DHCP on WAN bridge
+BR_WAN_DHCP4="false"
+# OLG_ISO_PLATFORM is where this ISO is running
+# Valid values: BAREMETAL | VM . Extensible (later: CLOUD, etc)
+if [[ "${OLG_ISO_PLATFORM}" == "VM" ]]; then
+  BR_WAN_DHCP4="true"
+fi
 
 # Make sure we are running as root
 if [[ $EUID -ne 0 ]]; then
@@ -29,13 +36,69 @@ for IFACE in "$WAN_IF" "$LAN_IF"; do
   fi
 done
 
-
 echo ">>> Set the host hostname"
 /opt/staging_scripts/set-hostname
 
 echo ">>> Installing virtualization packages..."
 apt-get update -y
 apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients virtinst bridge-utils cloud-image-utils libguestfs-tools xorriso genisoimage syslinux-utils
+
+echo ">>> Installing Docker..."
+sh /opt/staging_scripts/get-docker.sh
+
+# Get VyOS ISO
+# All Downloads/Updates should be done on stable network, before network configurations are changed
+if [[ ! -f "$ISO_PATH" ]]; then
+  echo ">>> Downloading VyOS ISO to $ISO_PATH"
+  echo -e "#!/bin/bash\ncurl -fL $ISO_URL -o $ISO_PATH" >download_iso.sh
+  chmod +x download_iso.sh
+  ./download_iso.sh
+  rm -f download_iso.sh
+
+  # Verify SHA256 checksum
+  echo ">>> Verifying SHA256 checksum..."
+  ACTUAL_SHA256=$(sha256sum "$ISO_PATH" | awk '{print $1}')
+  if [[ "$ACTUAL_SHA256" != "$ISO_SHA256" ]]; then
+    echo "ERROR: SHA256 checksum mismatch!"
+    echo "Expected: $ISO_SHA256"
+    echo "Actual:   $ACTUAL_SHA256"
+    echo "Removing corrupted ISO file..."
+    rm -f "$ISO_PATH"
+    exit 1
+  fi
+  echo ">>> SHA256 checksum verified successfully"
+else
+  echo ">>> VyOS ISO already present at $ISO_PATH"
+  # Verify SHA256 checksum of existing file
+  echo ">>> Verifying SHA256 checksum of existing ISO..."
+  ACTUAL_SHA256=$(sha256sum "$ISO_PATH" | awk '{print $1}')
+  if [[ "$ACTUAL_SHA256" != "$ISO_SHA256" ]]; then
+    echo "WARNING: SHA256 checksum mismatch for existing ISO!"
+    echo "Expected: $ISO_SHA256"
+    echo "Actual:   $ACTUAL_SHA256"
+    echo "Removing existing ISO and re-downloading..."
+    rm -f "$ISO_PATH"
+    echo -e "#!/bin/bash\ncurl -fL $ISO_URL -o $ISO_PATH" >download_iso.sh
+    chmod +x download_iso.sh
+    ./download_iso.sh
+    rm -f download_iso.sh
+
+    # Verify SHA256 checksum of new download
+    echo ">>> Verifying SHA256 checksum..."
+    ACTUAL_SHA256=$(sha256sum "$ISO_PATH" | awk '{print $1}')
+    if [[ "$ACTUAL_SHA256" != "$ISO_SHA256" ]]; then
+      echo "ERROR: SHA256 checksum mismatch!"
+      echo "Expected: $ISO_SHA256"
+      echo "Actual:   $ACTUAL_SHA256"
+      echo "Removing corrupted ISO file..."
+      rm -f "$ISO_PATH"
+      exit 1
+    fi
+    echo ">>> SHA256 checksum verified successfully"
+  else
+    echo ">>> SHA256 checksum verified successfully"
+  fi
+fi
 
 echo ">>> Ensuring libvirtd is running..."
 systemctl enable --now libvirtd
@@ -57,7 +120,7 @@ network:
   bridges:
     ${BR_WAN}:
       interfaces: [${WAN_IF}]
-      dhcp4: false
+      dhcp4: ${BR_WAN_DHCP4}
       dhcp6: false
       parameters:
         stp: false
@@ -76,23 +139,14 @@ echo ">>> Applying netplan (this may momentarily disrupt links on $WAN_IF/$LAN_I
 netplan apply
 
 # System settings
-echo br_netfilter | sudo tee /etc/modules-load.d/br_netfilter.conf
-sudo modprobe br_netfilter
-sudo tee /etc/sysctl.d/99-bridge-nf-off.conf >/dev/null <<'EOF'
+echo br_netfilter | tee /etc/modules-load.d/br_netfilter.conf
+modprobe br_netfilter
+tee /etc/sysctl.d/99-bridge-nf-off.conf >/dev/null <<'EOF'
 net.bridge.bridge-nf-call-iptables=0
 net.bridge.bridge-nf-call-ip6tables=0
 net.bridge.bridge-nf-call-arptables=0
 EOF
-sudo sysctl --system
-
-
-# Get VyOS ISO
-if [[ ! -f "$ISO_PATH" ]]; then
-  echo ">>> Downloading VyOS ISO to $ISO_PATH"
-  curl -fL $ISO_URL -o $ISO_PATH
-else
-  echo ">>> VyOS ISO already present at $ISO_PATH"
-fi
+sysctl --system
 
 # Create an ISO with out example config files
 mkisofs -joliet -rock -volid "cidata" -output /var/lib/libvirt/boot/vyos-configs.iso /opt/staging_scripts/vyos-configs/vyos-factory-config
@@ -124,7 +178,7 @@ virt-install -n "$VM_NAME" \
   --graphics vnc \
   --hvm \
   --virt-type kvm \
-  --disk path=/var/lib/libvirt/images/vyos.qcow2,bus=virtio,size=8 \
+  --disk path="$DISK_PATH",bus=virtio,size="$DISK_GB" \
   --disk /var/lib/libvirt/boot/vyos-configs.iso,device=cdrom \
   --noautoconsole
 
