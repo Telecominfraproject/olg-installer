@@ -1,0 +1,27 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=01
+
+USE_PROCD=1
+
+start_service() {
+	[ -e "/tmp/rrm_timestamp" ] && rm -rf /tmp/rrm_timestamp
+	[ -e "/tmp/rrm_chan_switch" ] && rm -rf /tmp/rrm_chan_switch
+	rm -rf /tmp/threshold_breach_count*
+	rm -rf /tmp/fixed_channel*
+	rm -rf /tmp/chanutil_phy*
+
+	procd_open_instance
+	procd_set_param command /usr/bin/rrmd.uc
+	procd_set_param respawn 3600 5 0
+	procd_close_instance
+}
+
+service_triggers() {
+	procd_add_reload_trigger rrm
+}
+
+reload_service() {
+	ubus call rrm reload
+}

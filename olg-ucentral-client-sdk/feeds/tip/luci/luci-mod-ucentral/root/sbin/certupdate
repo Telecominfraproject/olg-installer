@@ -1,0 +1,37 @@
+#!/bin/sh
+
+# make sure we have a tar file
+[ -f /tmp/certs.tar ] || exit 1
+
+. /lib/functions.sh
+
+# amke sure the cert partition is mounted
+mount_certs
+
+# make sure that this is a UBI volume
+ubi=$(grep certificates /proc/mounts  | tail -n 1 | grep ubi)
+[ -z "$ubi" ] && exit 1
+
+# extract the certificates
+mkdir -p /tmp/certs
+tar x -C /tmp/certs -f /tmp/certs.tar
+
+# make sure the required files exist
+[ -f /tmp/certs/key.pem -a -f /tmp/certs/cert.pem ] || exit 1
+
+# copy the certificates to /etc
+cp /tmp/certs/*.pem /certificates
+
+# remove old operational certs
+rm /certificates/operational.*
+
+# copy dev-id or gateway.json
+for a in gateway.json; do
+	if [ -f /tmp/certs/$a ]; then
+		cp /tmp/certs/$a /certificates
+	else
+		rm -f /certificates/$a
+	fi
+done
+
+exit 0

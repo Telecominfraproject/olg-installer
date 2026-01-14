@@ -1,0 +1,688 @@
+#!/usr/bin/ucode
+
+'use strict';
+
+push(REQUIRE_SEARCH_PATH, '/usr/share/ucentral/*.uc');
+
+import * as libubus from 'ubus';
+import * as libuci from 'uci';
+import * as uloop from 'uloop';
+import * as nl80211 from 'nl80211';
+import * as rtnl from 'rtnl';
+import * as fs from 'fs';
+
+let capab = {};
+let capabfile = fs.open("/etc/ucentral/capabilities.json", "r");
+if (capabfile) {
+	capab = json(capabfile.read("all"));
+	capabfile.close();
+}
+
+uloop.init();
+
+let ubus = libubus.connect();
+let uci = libuci.cursor();
+
+let hostapd = {};
+let hapd_subscriber;
+let dhcp_subscriber;
+let dhcp_relay_subscriber;
+let log_subscriber;
+let netifd_subscriber;
+let ratelimit = false;
+let config;
+let wan_ports;
+let carrier = {};
+let boot_file = "/tmp/booted";
+let ucentral_running = false;
+let pending_events = [];
+let relay = {};
+let net_config = {};
+let vlan_refcount = {};
+
+
+function config_load() {
+	uci.load('event');
+	config = uci.get_all('event');
+	wan_ports = config.config?.wan_port || [ 'eth0' ];
+
+	if (config.wifi?.filter == '*')
+		config.wifi.filter = [ 'probe', 'auth', 'assoc', 'disassoc', 'deauth', 'local-deauth', 'inactive-deauth', 'key-mismatch', 'beacon-report', 'radar-detected' ];
+
+	if (config.dhcp?.filter == '*')
+		config.dhcp.filter = [ 'ack', 'discover', 'offer', 'request', 'solicit', 'reply', 'renew' ];
+
+	net_config = {};
+}
+
+function vlan_refcount_init() {
+	let stations = require('wifi.station');
+
+	vlan_refcount = {};
+
+	for (let k, v in stations) {
+		let vlan = split(k, '-v')[1];
+		let count = length(v);
+		if (vlan && count > 0) {
+			vlan_refcount[vlan] = count;
+		}
+	}
+}
+
+function match(object, type, list) {
+	if (object in list || type in list)
+		return true;
+	return false;
+}
+
+function eth_find_bridge_vlan_id(ifname) {
+	for (let k, v in net_config) {
+		if (v['.type'] != "bridge-vlan")
+			continue;
+		if (ifname in v.ports)
+			return v.vlan;
+	}
+
+	return 0;
+}
+
+function eth_get_bridge_vlan_id(ifname) {
+	if (!ifname || length(ifname) == 0)
+		return 0;
+
+	let vlan_id = eth_find_bridge_vlan_id(ifname);
+	if (!vlan_id) {
+		uci.load('network');
+		net_config = uci.get_all('network');
+		vlan_id = eth_find_bridge_vlan_id(ifname);
+	}
+
+	return vlan_id;
+}
+
+
+function configure_switch_vlan(vlan_id){
+	let cmd = 'swconfig dev ' + config.config.swconfig + ' vlan ' + vlan_id + ' set ports \"' + join(' ', config.config.swconfig_ports) + '\"';
+	system(cmd);
+}
+
+function get_bridge_interfaces(bridge){
+	let path = '/sys/class/net/'+bridge+'/brif';
+	let dir = fs.lsdir(path);
+	return dir;
+}
+
+function event(object, verb, payload) {
+	let type = object;
+	if (verb)
+		type += '.' + verb;
+
+	if (match(object, type, config.realtime?.filter))
+		if (ucentral_running)
+			ubus.call('ucentral', 'event', {
+				type,
+				payload
+			});
+		else 
+			push(pending_events, {type, payload});
+
+	else if (!config.bulk?.interval || match(object, type, config.bulk?.filter))
+		ubus.call('ucentral', 'telemetry', {
+			event: 'event',
+			payload: {
+				type,
+				payload
+			}
+		});
+}
+
+function freq2chan(freq) {
+	if (freq == 2484)
+		return 14;
+	else if (freq < 2484)
+		return (freq - 2407) / 5;
+	else if (freq >= 4910 && freq <= 4980)
+		return (freq - 4000) / 5;
+	else if(freq >= 56160 + 2160 * 1 && freq <= 56160 + 2160 * 6)
+		return (freq - 56160) / 2160;
+	else if (freq == 5935)
+		return (freq - 5925) / 5;
+	else if (freq > 5950 && freq <= 7115)
+		return (freq - 5950) / 5;
+	else if (freq >= 5000 && freq < 5900)
+		return (freq - 5000) / 5;
+	else
+		return -1;
+}
+
+/* notify data expected format:
+ * { "ifname": "wlan1", "freq": 5180, "bssid": "XX:XX:XX:XX:XX:XX"
+ */
+function handle_channel_switch(hapd, notify) {
+	if (!notify || !notify?.data || !notify.data?.freq)
+		return;
+
+	let ch = freq2chan(notify.data.freq);
+	if (ch < 0)
+		return;
+
+	hapd.freq = notify.data.freq;
+	hapd.channel = ch;
+}
+
+let handlers;
+handlers = {
+	'sta-authorized': function(notify, hapd) {
+		if (!hapd || wildcard(hapd['ifname'], 'eth*')) {
+			if (!('vlan_id' in notify.data) || notify.data['vlan_id'] == 0)
+				return;
+
+			if (!wildcard(notify.data.ifname, 'eth*'))
+				return;
+
+			/*
+			 * This must be a wired 802.1x client with a dynamic VLAN assigned, let's check
+			 * if we need to workaround the bridge VLAN config
+			 */
+
+			let br_vid = eth_get_bridge_vlan_id(notify.data.ifname);
+			if (!br_vid || br_vid == notify.data['vlan_id'])
+				return;
+
+			/*
+			 * netifd will make the bridge VLAN the untagged PVID for the port
+			 * and will add the assigned DVLAN also as an untagged (non-PVID) to the port.
+			 * The result of this is that the client will have access on the bridge VLAN,
+			 * not the correct assigned VLAN.  The proper fix should be in netifd, but
+			 * that is complex and will take time, so this workaround seems to work for now
+			 */
+			system("bridge vlan del dev " + notify.data.ifname + " vid " + br_vid);
+			system("bridge vlan add dev " + notify.data.ifname + " vid " + notify.data.vlan_id + " pvid untagged");
+			return;
+		}
+		/* force FDB flush on QCA Wifi-6 silicon */
+		system(`echo ${notify.data.address} > /sys/kernel/debug/ssdk_flush_mac`);
+		event('client', 'join', {
+			client: notify.data.address,
+			ssid: hapd.ssid,
+			bssid: hapd.bssid,
+			channel: hapd.channel,
+			band: hapd.band,
+		});
+		if (ratelimit) {
+			let msg = {
+				device: (() => {
+					if (('vlan' in notify.data) && notify.data.vlan != 0)
+						return notify.data.ifname + "-v" + notify.data.vlan;
+					else
+						return notify.data.ifname;
+				})(),
+				address: notify.data.address,
+			};
+			if (notify.data['rate-limit']) {
+				msg.rate_ingress = `${notify.data['rate-limit'][0]}`;
+				msg.rate_egress = `${notify.data['rate-limit'][1]}`;
+			} else
+				msg.defaults = hapd.ssid;
+			ubus.call('ratelimit', 'client_set', msg);
+		}
+	},
+
+	'channel-switch' : function(notify, hapd) {
+		handle_channel_switch(hapd, notify);
+	},
+
+	disassoc: function(notify, hapd) {
+		if (ratelimit) {
+			let msg = {
+				address: notify.data.address,
+				device: hapd.ifname,
+			};
+			ubus.call('ratelimit', 'client_delete', msg);
+		}
+	},
+
+	'key-mismatch': function(notify, hapd) {
+		event('client', 'key-mismatch', {
+			client: notify.data.address,
+			ssid: hapd.ssid,
+			bssid: hapd.bssid,
+		});
+	}, 
+
+	vlan_add_swconfig: function(notify) {
+		let msg = {                             
+			name: notify.data.ifname,   
+			'link-ext': true,           
+			vlan: [ `${notify.data.vlan_id}:u` ]  
+		};                                          
+		ubus.call('network.interface.up_none', 'add_device', msg);          
+		if (`${notify.data.vlan_id}` in config.config.swconfig_vlans)            
+                        return;          
+		msg = {                          
+			name: 'eth0.' + notify.data.vlan_id,
+			vlan: [ `${notify.data.vlan_id}:u` ]
+		};
+		ubus.call('network.interface.up_none', 'add_device', msg);
+
+		msg = { 'devices': { } };
+		msg['devices']['eth0.' + notify.data.vlan_id] = { 'ingress': true, 'egress': true };
+		ubus.call('dhcpsnoop', 'add_devices', msg);
+
+		let cmd = 'swconfig dev ' + config.config.swconfig + ' vlan ' + notify.data.vlan_id + ' set ports \"' + join(' ', config.config.swconfig_ports) + '\"';
+		system(cmd);                                                                                                                                           
+		system('swconfig dev ' + config.config.swconfig + ' set apply');    
+	},
+
+	vlan_add: function(notify) {
+		if (config.config.swconfig)
+			return handlers.vlan_add_swconfig(notify);
+
+		let vlan_id = `${notify.data.vlan_id}`;
+		vlan_refcount[vlan_id] = (vlan_refcount[vlan_id] || 0) + 1;
+
+		let parts = split(notify.data.ifname, '-v');
+		let is_wifi_iface = (length(parts) == 2 && wildcard(parts[0], 'wlan*'));
+
+		if (vlan_refcount[vlan_id] > 1 && !is_wifi_iface)
+			return;
+
+		if (vlan_refcount[vlan_id] == 1) {
+			for (let wan in wan_ports) {
+				let msg = {
+					name: wan,
+					vlan: [ `${notify.data.vlan_id}:t` ]
+				};
+				ubus.call('network.interface.up_none', 'add_device', msg);
+				ubus.call('udevstats', 'add_device', { device: wan, vlan: +notify.data.vlan_id });
+			}
+		}
+
+		let msg = {
+			name: notify.data.ifname,
+			'link-ext': true,
+			vlan: [ `${notify.data.vlan_id}:u` ]
+		};
+		ubus.call('network.interface.up_none', 'add_device', msg);
+		ubus.call('dhcprelay', 'check_devices');
+	},
+
+	vlan_remove: function(notify) {
+		if (config.config.swconfig)
+			return;
+
+		let vlan_id = `${notify.data.vlan_id}`;
+		vlan_refcount[vlan_id] = (vlan_refcount[vlan_id] || 1) - 1;
+
+		if (vlan_refcount[vlan_id] > 0)
+			return;
+		delete vlan_refcount[vlan_id];
+
+		for (let wan in wan_ports) {
+			let msg = {
+				name: wan,
+				vlan: [ `${notify.data.vlan_id}:t` ]
+			};
+			ubus.call('network.interface.up_none', 'remove_device', msg);
+		}
+
+		let msg = {
+			name: notify.data.ifname,
+			'link-ext': true,
+			vlan: [ `${notify.data.vlan_id}:u` ]
+		};
+		ubus.call('network.interface.up_none', 'remove_device', msg);
+
+		if (ratelimit) {
+			let msg = {
+				device: notify.data.ifname,
+			};
+			ubus.call('ratelimit', 'device_delete', msg);
+		}
+	},
+};
+
+
+function hapd_subscriber_notify_cb(notify) {
+	if (config.wifi?.filter == '*' || index(config.wifi?.filter || [], notify.type) >= 0) {
+		let payload = {};
+		payload[notify.type] = notify.data;
+		ubus.call('ucentral', 'telemetry', {
+			event: 'wifi-frames',
+			payload
+		});
+	}
+	if (notify.type == 'probe')
+		return 0;
+	let handler = handlers[notify.type];
+	if (!handler)
+		return 0;
+	let hapd = hostapd[notify.data.ifname];
+	handler(notify, hapd);
+
+	return 0;
+}
+
+function hostapd_event(ifname, type) {
+	let payload = {};
+	if (!(ifname in hostapd) || wildcard(ifname, 'eth*'))
+		return;
+	for (let p in [ 'ssid', 'bssid', 'channel', 'band' ])
+		payload[p] = hostapd[ifname][p];
+
+	event('wifi', type, payload);
+}
+
+function hostapd_add(path, obj) {
+	let ifname = obj[1];
+
+	hostapd[ifname] = ubus.call(path, 'get_status');
+	hostapd[ifname].ifname = ifname;
+	hostapd[ifname].path = path;
+
+	uci.load('wireless');
+	hostapd[ifname].config = uci.get_all('wireless', hostapd[ifname].uci_section);
+
+	printf('%.J\n', hostapd[ifname]);
+
+	if (+hostapd[ifname].config?.strict_forwarding)
+		ubus.call('bridger', 'set_device_config', {
+			name: ifname,
+			redirect: wan_ports[0]
+		});
+
+	if (hostapd[ifname].op_class >= 81 &&
+	    hostapd[ifname].op_class <= 84)
+		hostapd[ifname].band = '2G';
+
+	else if (hostapd[ifname].op_class >= 115 &&
+		 hostapd[ifname].op_class <= 130)
+		hostapd[ifname].band = '5G';
+
+	else if (hostapd[ifname].op_class >= 133 &&
+		 hostapd[ifname].op_class <= 136)
+		hostapd[ifname].band = '6G';
+
+	else
+		hostapd[ifname].band = 'unknown';
+
+	hostapd_event(ifname, 'start');
+
+	printf('adding %s\n', path);
+	hapd_subscriber.subscribe(path);
+}
+
+function hostapd_remove(path, obj) {
+	let ifname = obj[1];
+	hostapd_event(ifname, 'stop');
+	printf('removing %s\n', path);
+	delete hostapd[ifname];
+	if (ratelimit) {
+		let msg = {
+			device: ifname,
+		};
+		ubus.call('ratelimit', 'device_delete', msg);
+	}
+}
+
+function hapd_subscriber_remove_cb(remove) {
+	printf('remove: %.J\n', remove);
+}
+
+function dhcp_subscriber_notify_cb(notify) {
+	if (config.dhcp?.filter == '*' || index(config.dhcp?.filter || [], notify.type) >= 0) {
+		notify.data.type = notify.type;
+		ubus.call('ucentral', 'telemetry', {
+			event: 'dhcp-snooping',
+			payload: notify.data,
+		});
+	}
+}
+
+function dhcp_subscriber_remove_cb(remove) {
+	printf('dhcp remove: %.J\n', remove);
+}
+
+function match_dhcp_relay_option82(format, hapd) {
+	switch(format) {
+		case 'ap-mac':
+			uci.load('ucentral');
+			let ucentral = uci.get_all('ucentral', 'config');
+			return ucentral.serial;
+		case 'ssid':
+			return hapd.config.ssid;
+		case 'vlan-id':
+			return hapd.config.vlan_id;
+	}
+}
+
+function dhcp_relay_subscriber_notify_cb(notify) {
+	let ifname = split(notify.data.info.device, '-v');
+	let hapd = hostapd[ifname[0]];
+	let vlan = ifname[1];
+	if (hapd) {
+		vlan ??= hapd.config.vlan_id;
+		let circuit_id = match_dhcp_relay_option82(relay['vlan' + vlan]?.circuit_id, hapd);
+		let remote_id = match_dhcp_relay_option82(relay['vlan' + vlan]?.remote_id, hapd);
+		return {
+			address: relay['vlan' + vlan]?.server,
+			options: [
+				[ 82, 
+					chr(1) + chr(length(circuit_id)) + circuit_id +
+					chr(2) + chr(length(remote_id)) + remote_id
+				]
+			]
+		};
+	}
+}
+
+function dhcp_relay_subscriber_remove_cb(remove) {
+	printf('dhcp-relay remove: %.J\n', remove);
+}
+
+function log_subscriber_notify_cb(notify) {
+	let msg = split(notify.data.msg, ': ', 2);
+	let daemon = split(msg[0], '[')[0];
+
+	switch(daemon) {
+	case 'dropbear':
+		event('ssh', '',  { msg: msg[1] });
+		break;
+	}
+}
+
+function log_subscriber_remove_cb(remove) {
+	printf('dhcp remove: %.J\n', remove);
+}
+
+function netifd_add_handler(notify){
+	/*Listen to change in vlan id of upstream interfaces */
+	if(!wildcard(notify.data.name,"up*"))
+		return 0;
+	/*get all the interfaces from up bridge*/
+	let bridge_interfaces= get_bridge_interfaces("up");
+
+	if (!bridge_interfaces) {
+	        return 0;
+	}
+	for (let entry in bridge_interfaces) {
+		/*filter only for wlan mpsk interfaces*/
+		if(wildcard(entry,"wlan*-v*")){
+			let wlan_vlan_string=split(entry,"-v");
+			let wlan_vlan_id=wlan_vlan_string[1];
+			/*reconfigure the switch for vlan id
+			of mpsk clients */
+			configure_switch_vlan(wlan_vlan_id);
+		}
+	}
+}
+
+
+function netifd_subscriber_notify_cb(notify) {
+	if (notify.type != 'add'){
+                return 0;
+	}
+
+	if(notify.data.name){
+		netifd_add_handler(notify);
+	}
+
+        return 0;
+}
+
+
+function netifd_subscriber_remove_cb(remove) {
+        printf('remove: %.J\n', remove);
+}
+
+function send_pending_events() {
+	for (let payload in pending_events)
+		ubus.call('ucentral', 'event', payload);
+	pending_events = [];
+}
+
+function unsub_object(add, id, path) {
+	let object = split(path, '.', 2);
+
+	switch (path) {
+	case 'ratelimit':
+		ratelimit = add;
+		break;
+	case 'dhcpsnoop':
+		printf('adding %s\n', path);
+		dhcp_subscriber.subscribe(path);
+		break;
+	case 'dhcprelay':
+		printf('adding %s\n', path);
+		uci.load('dhcprelay');
+		relay = uci.get_all('dhcprelay');
+		dhcp_relay_subscriber.subscribe(path);
+		break;
+	case 'log':
+		printf('adding %s\n', path);
+		log_subscriber.subscribe(path);
+		break;
+	case 'ucentral':
+		if(add) {
+			ucentral_running = true;
+			send_pending_events();
+		} else
+			ucentral_running = false;
+		break;
+        case 'network.device':
+                netifd_subscriber.subscribe(path);
+                break;
+	}
+	if (object[0] == 'hostapd' && object[1]) {
+		if (add)
+			hostapd_add(path, object);
+		else
+			hostapd_remove(path, object);
+	}
+}
+
+function listener_cb(event, payload) {
+	unsub_object(event == 'ubus.object.add', payload.id, payload.path);
+}
+
+function nl_cb(msg) {
+	let mac = msg.msg.mac;
+	let sinfo = msg.msg.sta_info;
+	let payload = {
+		client: mac,
+		tx_bytes: sinfo.tx_bytes64,
+		rx_bytes: sinfo.rx_bytes64,
+		tx_packets: sinfo.tx_packets,
+		rx_packets: sinfo.rx_packets,
+		connected_time: sinfo.connected_time,
+	};
+	event('client', 'leave',  payload);
+}
+
+function ifname_lookup(prefix, ifname, list) {
+	let idx = index(list, ifname);
+	if (idx < 0)
+		return;
+	return prefix + (idx + 1);
+}
+
+function rtnl_cb(msg) {
+	if (!exists(msg.msg, "carrier"))
+		return;
+
+	let name = ifname_lookup('LAN', msg.msg?.ifname, capab.network?.lan);
+	if (!name)
+		name = ifname_lookup('WAN', msg.msg?.ifname, capab.network?.wan);
+	if (name) {
+		let verb = msg.msg.carrier ? 'carrier-up' : 'carrier-down';	
+		if (carrier[name] == verb)
+			return;
+		carrier[name] = verb;
+		event('wired', verb, { name });
+	}
+}
+
+function is_reboot() {
+	if (fs.access(boot_file, "f"))
+		return false;
+
+	let file = fs.open(boot_file, "w");
+	if (file)
+		file.close();
+
+	return true;
+}
+	
+let ubus_methods = {
+	event: {
+		call: function(req) {
+			if (!req.args.object || !req.args.payload)
+				return ubus.STATUS_INVALID_ARGUMENT;
+
+			event(req.args.object, req.args.verb, req.args.payload);
+			return 0;
+		},
+		args: {
+			object:"",
+			verb:"",
+			payload:{},
+		}
+	},
+
+	reload: {
+		call: function(req) {
+			config_load();
+		},
+		args: {
+
+		}
+	},
+};
+
+config_load();
+vlan_refcount_init();
+
+hapd_subscriber = ubus.subscriber(hapd_subscriber_notify_cb, hapd_subscriber_remove_cb);
+dhcp_subscriber = ubus.subscriber(dhcp_subscriber_notify_cb, dhcp_subscriber_remove_cb);
+log_subscriber = ubus.subscriber(log_subscriber_notify_cb, log_subscriber_remove_cb);
+dhcp_relay_subscriber = ubus.subscriber(dhcp_relay_subscriber_notify_cb, dhcp_relay_subscriber_remove_cb);
+netifd_subscriber= ubus.subscriber(netifd_subscriber_notify_cb, netifd_subscriber_remove_cb);
+
+
+let list = ubus.list();
+for (let k, path in list)
+	unsub_object(true, 0, path);
+
+ubus.listener('ubus.object.add', listener_cb);
+ubus.listener('ubus.object.remove', listener_cb);
+
+ubus.publish("event", ubus_methods);
+
+nl80211.listener(nl_cb, [ nl80211.const.NL80211_CMD_DEL_STATION ]);
+rtnl.listener(rtnl_cb, null, [ rtnl.const.RTNLGRP_LINK ]);
+
+if (is_reboot())
+	event('unit', 'boot-up', { cause:"" });
+
+uloop.run();
+uloop.done();

@@ -1,0 +1,5 @@
+#config network
+#	list ports	'lan1'
+#	list ports	'lan2'
+#	list ports	'lan3'
+#	list ports	'lan4'

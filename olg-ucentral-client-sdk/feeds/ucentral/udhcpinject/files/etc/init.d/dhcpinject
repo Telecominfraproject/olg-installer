@@ -1,0 +1,39 @@
+#!/bin/sh /etc/rc.common
+
+USE_PROCD=1
+
+START=95
+STOP=10
+
+SERVICE_NAME="dhcpinject"
+PROG=/usr/bin/udhcpinject
+
+start_service() {
+    # check if config file has contents by executing `uci get dhcpinject.@network[0]`
+    if [ -z "$(uci get dhcpinject.@network[0] 2>/dev/null)" ]; then
+        echo "No upstreams specified, exiting $SERVICE_NAME"
+        return 0
+    fi
+    # Wait for wifi to be up
+    ubus -t 90 wait_for network.wireless
+
+    procd_open_instance "$SERVICE_NAME"
+    procd_set_param command $PROG
+    procd_set_param respawn 3600 10 10
+    procd_set_param file /etc/config/dhcpinject
+    procd_close_instance
+}
+
+stop_service() {
+    procd_kill $SERVICE_NAME
+}
+
+reload_service() {
+    procd_send_signal $SERVICE_NAME
+}
+
+restart_service() {
+    stop
+    sleep 1
+    start
+}
