@@ -1,0 +1,37 @@
+---
+description: Add the ucentral dependencies
+feeds:
+  - name: ucentral
+    path: ../../feeds/ucentral
+  - name: tip
+    path: ../../feeds/tip
+
+packages:
+  - cJSON
+  - curl
+  - rtty-openssl
+  - ucentral-client
+  - ucentral-dataplane
+  - ucentral-event
+  - ucentral-schema
+  - ucentral-state
+  - ucentral-tools
+  - ucode
+  - openssl-util
+  - cloud_discovery
+diffconfig: |
+  CONFIG_OPENSSL_ENGINE=y
+  CONFIG_OPENSSL_PREFER_CHACHA_OVER_GCM=y
+  CONFIG_OPENSSL_WITH_ASM=y
+  CONFIG_OPENSSL_WITH_CHACHA_POLY1305=y
+  CONFIG_OPENSSL_WITH_CMS=y
+  CONFIG_OPENSSL_WITH_DEPRECATED=y
+  CONFIG_OPENSSL_WITH_ERROR_MESSAGES=y
+  CONFIG_OPENSSL_WITH_PSK=y
+  CONFIG_OPENSSL_WITH_SRP=y
+  CONFIG_OPENSSL_WITH_TLS13=y
+  CONFIG_IMAGEOPT=y
+  CONFIG_PREINITOPT=y
+  CONFIG_TARGET_PREINIT_SUPPRESS_STDERR=y
+  CONFIG_TARGET_PREINIT_DISABLE_FAILSAFE=y
+  CONFIG_LIBCURL_OPENSSL=y

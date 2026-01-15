@@ -1,0 +1,14 @@
+{
+	"secure-rtty": true,
+	"compatible": "intel",
+	"model": "intel",
+	"version": {
+		"olg": {},
+		"schema": {}
+	},
+	"platform": "olg",
+	"network": {
+		"lan": ["eth1"],
+		"wan": ["eth0"]
+	}
+}
