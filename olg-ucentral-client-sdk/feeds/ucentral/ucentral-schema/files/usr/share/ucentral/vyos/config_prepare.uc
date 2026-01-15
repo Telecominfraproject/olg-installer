@@ -67,19 +67,95 @@ function vyos_retrieve_info(op_arg, op)
 	return jsn;
 }
 
+let ethernet = {
+	ports: {},
+
+	// Discover logical ports (WAN, LAN, LAN1, LAN2...) -> { netdev, index }
+	discover_ports: function() {
+		let capab = load_capabilities();
+		if (!capab || type(capab.network) != "object")
+			return {};
+
+		let roles = {};
+		let ret_val = {};
+
+		for (let role, spec in capab.network) {
+			if (type(spec) != "array")
+				continue;
+
+			for (let i, ifname in spec) {
+				role = uc(role);
+				let netdev = split(ifname, ':');  // eth0 or eth0:5 (ignore suffix)
+				let port = { netdev: netdev[0], index: i };
+				push(roles[role] = roles[role] || [], port);
+			}
+		}
+
+		for (let role, ports in roles) {
+			map(sort(ports, (a, b) => (a.index - b.index)), (port, i) => {
+					ret_val[role + (i + 1)] = port;
+				});
+		}
+
+		return ret_val;
+	},
+
+	init: function() {
+		this.ports = this.discover_ports();
+		return this;
+	},
+
+	// Match select-ports globs against ethernet.ports
+	lookup: function(globs) {
+		let matched = {};
+
+		for (let glob, _ in globs) {
+			for (let name, spec in this.ports) {
+				if (wildcard(name, glob) && spec?.netdev)
+					matched[spec.netdev] = true;
+			}
+		}
+
+		return matched;
+	},
+
+	lookup_interface_by_port: function(interface) {
+		let globs = {};
+
+		if (type(interface?.ethernet) != "array")
+			return [];
+
+		map(interface.ethernet, eth => {
+			if (type(eth?.select_ports) == "array")
+				map(eth.select_ports, glob => globs[glob] = true);
+		});
+
+		return sort(keys(this.lookup(globs)));
+	},
+
+	mark_eth_used: function(list, used_map) {
+		if (type(used_map) != "object" || type(list) != "array")
+			return;
+
+		for (let m in list) {
+			if (type(m) == "string" && length(m))
+				used_map[m] = true;
+		}
+	},
+
+	upstream_bridge_name: function() {
+		return "br0";
+	},
+
+	calculate_next_bridge_name: function(next_br_index) {
+		return "br" + next_br_index;
+	}
+};
+
+
 return {
 	vyos_render: function(config) {
-		let capab = load_capabilities();
-		let wan_ifname = null;
-		let lan_ifname = null;
-
-		if (capab && type(capab.network) == "object") {
-			if (type(capab.network.wan) == "array" && length(capab.network.wan) > 0)
-				wan_ifname = capab.network.wan[0];
-
-			if (type(capab.network.lan) == "array" && length(capab.network.lan) > 0)
-				lan_ifname = capab.network.lan[0];
-		}
+		ethernet.init();
 		let op_arg = { };
 		let op = "showConfig";
 		op_arg.path = ["pki"];
@@ -89,8 +165,7 @@ return {
 
 		let interfaces = render('templates/interface.uc', {
 			config,
-			wan_ifname,
-			lan_ifname
+			ethernet
 		});
 
 		op_arg.path = ["system", "login"];
@@ -101,7 +176,7 @@ return {
 
 		let nat = render('templates/nat.uc', {
 			config,
-			wan_ifname,
+			ethernet,
 			network_base
 		});
 
