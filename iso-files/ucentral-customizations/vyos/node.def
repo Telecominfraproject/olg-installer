@@ -1,0 +1,3 @@
+help: Show system statistics
+run: /opt/vyatta/bin/vyos-system-stats
+allowed: echo ""

@@ -13,6 +13,13 @@ DISK_PATH="$IMAGES_DIR/${VM_NAME}.qcow2"
 BR_WAN="br-wan"
 BR_LAN="br-lan"
 NETPLAN_FILE="/etc/netplan/99-vyos-bridges.yaml"
+# Default: no DHCP on WAN bridge
+BR_WAN_DHCP4="false"
+# OLG_ISO_PLATFORM is where this ISO is running
+# Valid values: BAREMETAL | VM . Extensible (later: CLOUD, etc)
+if [[ "${OLG_ISO_PLATFORM}" == "VM" ]]; then
+  BR_WAN_DHCP4="true"
+fi
 
 # Make sure we are running as root
 if [[ $EUID -ne 0 ]]; then
@@ -29,13 +36,25 @@ for IFACE in "$WAN_IF" "$LAN_IF"; do
   fi
 done
 
-
 echo ">>> Set the host hostname"
 /opt/staging_scripts/set-hostname
 
 echo ">>> Installing virtualization packages..."
 apt-get update -y
 apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients virtinst bridge-utils cloud-image-utils libguestfs-tools xorriso genisoimage syslinux-utils
+
+echo ">>> Installing Docker..."
+curl -fsSL https://get.docker.com -o get-docker.sh && sudo sh get-docker.sh
+rm -f get-docker.sh
+
+# Get VyOS ISO
+# All Downloads/Updates should be done on stable network, before network configurations are changed
+if [[ ! -f "$ISO_PATH" ]]; then
+  echo ">>> Downloading VyOS ISO to $ISO_PATH"
+  curl -fL $ISO_URL -o $ISO_PATH
+else
+  echo ">>> VyOS ISO already present at $ISO_PATH"
+fi
 
 echo ">>> Ensuring libvirtd is running..."
 systemctl enable --now libvirtd
@@ -57,7 +76,7 @@ network:
   bridges:
     ${BR_WAN}:
       interfaces: [${WAN_IF}]
-      dhcp4: false
+      dhcp4: ${BR_WAN_DHCP4}
       dhcp6: false
       parameters:
         stp: false
@@ -84,15 +103,6 @@ net.bridge.bridge-nf-call-ip6tables=0
 net.bridge.bridge-nf-call-arptables=0
 EOF
 sudo sysctl --system
-
-
-# Get VyOS ISO
-if [[ ! -f "$ISO_PATH" ]]; then
-  echo ">>> Downloading VyOS ISO to $ISO_PATH"
-  curl -fL $ISO_URL -o $ISO_PATH
-else
-  echo ">>> VyOS ISO already present at $ISO_PATH"
-fi
 
 # Create an ISO with out example config files
 mkisofs -joliet -rock -volid "cidata" -output /var/lib/libvirt/boot/vyos-configs.iso /opt/staging_scripts/vyos-configs/vyos-factory-config
@@ -124,9 +134,47 @@ virt-install -n "$VM_NAME" \
   --graphics vnc \
   --hvm \
   --virt-type kvm \
-  --disk path=/var/lib/libvirt/images/vyos.qcow2,bus=virtio,size=8 \
+  --disk path="$DISK_PATH",bus=virtio,size="$DISK_GB" \
   --disk /var/lib/libvirt/boot/vyos-configs.iso,device=cdrom \
   --noautoconsole
 
-# Set the VM o autostart on host boot
+# Set the VM to autostart on host boot
 virsh autostart $VM_NAME
+
+echo ">>> Setting up uCentral persistent directories..."
+mkdir -p /opt/ucentral-persistent/{vyos/templates,config,config-shadow,ucentral}
+
+echo ">>> Copying uCentral customizations..."
+if [ -d "/opt/staging_scripts/iso-files/ucentral-customizations" ]; then
+  cp /opt/staging_scripts/iso-files/ucentral-customizations/capabilities.uc \
+     /opt/ucentral-persistent/ 2>/dev/null || echo "Warning: capabilities.uc not found"
+
+  cp -r /opt/staging_scripts/iso-files/ucentral-customizations/vyos/* \
+        /opt/ucentral-persistent/vyos/ 2>/dev/null || echo "Warning: vyos files not found"
+
+  echo ">>> Setting permissions..."
+  chown -R root:root /opt/ucentral-persistent
+  chmod -R 755 /opt/ucentral-persistent
+
+  echo "[✓] uCentral customizations installed to /opt/ucentral-persistent/"
+else
+  echo "[!] Warning: uCentral customizations not found in /opt/staging_scripts/iso-files/"
+  echo "    You may need to manually copy .uc files for VyOS integration."
+fi
+
+echo ""
+echo "======================================================================"
+echo "VyOS VM setup complete!"
+echo "======================================================================"
+echo ""
+echo "Next steps:"
+echo "  1. Reboot the host: sudo reboot"
+echo "  2. After reboot, connect to VyOS console: sudo virsh console vyos"
+echo "  3. Login with: vyos / vyos"
+echo "  4. Install VyOS: install image (follow prompts, use defaults)"
+echo "  5. Reboot VyOS: reboot"
+echo "  6. If VM doesn't restart, manually start it: sudo virsh start vyos"
+echo "  7. Load factory config (see README.md for details)"
+echo ""
+echo "For uCentral cloud management setup, see README-Ucentral.md"
+echo "======================================================================"

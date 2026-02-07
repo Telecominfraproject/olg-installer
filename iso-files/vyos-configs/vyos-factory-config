@@ -16,10 +16,20 @@ set interfaces ethernet eth1 vif 101 description 'LAN VLAN 101 (APs)'
 set interfaces ethernet eth1 vif 1000 address '172.20.0.1/20'
 set interfaces ethernet eth1 vif 1000 description 'LAN VLAN 1000 (Guest devices)'
 set interfaces loopback lo
-set nat source rule 100 description 'NAT out WAN'
+set system name-server 1.1.1.1
+set system name-server 9.9.9.9
+set nat source rule 100 description 'NAT VLAN 1000 (Guest)'
 set nat source rule 100 outbound-interface name 'eth0'
 set nat source rule 100 source address '172.20.0.0/20'
 set nat source rule 100 translation address 'masquerade'
+set nat source rule 101 description 'NAT VLAN 100 (Switches)'
+set nat source rule 101 outbound-interface name 'eth0'
+set nat source rule 101 source address '192.168.100.0/24'
+set nat source rule 101 translation address 'masquerade'
+set nat source rule 102 description 'NAT VLAN 101 (APs)'
+set nat source rule 102 outbound-interface name 'eth0'
+set nat source rule 102 source address '192.168.101.0/24'
+set nat source rule 102 translation address 'masquerade'
 set service dhcp-server shared-network-name VLAN100 authoritative
 set service dhcp-server shared-network-name VLAN100 subnet 192.168.100.0/24 option default-router '192.168.100.1'
 set service dhcp-server shared-network-name VLAN100 subnet 192.168.100.0/24 option name-server '192.168.100.1'

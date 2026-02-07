@@ -19,10 +19,10 @@ The result of this will be an ISO in the project working folder.
 - Boot on the ISO, once the install is completed the server will power-off
 - Power back the server
 - Login to the Linux host with username `olgadm` and password `olgadm`
-- Edit `/opt/staging_scripts/setup-config` and adgst the network interface names and if required the VyOS VM sizing parameters
+- Edit `/opt/staging_scripts/setup-config` and adjust the network interface names and if required the VyOS VM sizing parameters
     - You might need to adjust the VyOS rolling release path. Reference: https://github.com/vyos/vyos-nightly-build/releases
-- Run the setup script:
-    - `sudo /opt/staging_scripts/setup-vyos-bridge.sh` to use the network bridge method
+- Run the setup script (Docker will be installed automatically):
+    - `sudo /opt/staging_scripts/setup-vyos-bridge.sh` to use the network bridge method (recommended)
     - `sudo /opt/staging_scripts/setup-vyos-hw-passthru.sh` to use the hardware passthru for the network interfaces (WIP)
 - Reboot the host
 - Connect to the VyOS console with `virsh console vyos`
@@ -48,20 +48,28 @@ Here is how to load this configuration:
 
 - Open a console to the VyOS console with `virsh console vyos`
 - If required login with your credentials
-- Mound the ISO containing the configs
+- Mount the ISO containing the configs
     ```
     sudo mkdir /opt/vyos-configs ; sudo mount /dev/sr1 /opt/vyos-configs
     ```
 - Go in config mode with `config`
 - Load the factory config with:
     ```
-    source /opt/olg-configs/vyos-factory-config
+    source /opt/vyos-configs/vyos-factory-config
     commit
     save
     exit
     ```
 
-## Testes platforms
+## uCentral Cloud Management Setup (Optional)
+
+To connect the OLG to a cloud gateway controller, see:
+- **Quick setup:** [README-Ucentral.md](README-Ucentral.md)
+- **Operational guide:** [docs/OLG_SYSTEM_RESTART_GUIDE.md](docs/OLG_SYSTEM_RESTART_GUIDE.md)
+
+The setup script automatically installs Docker, which is required for running the uCentral client container.
+
+## Tested platforms
 
 - MinisForum MS-01
 
