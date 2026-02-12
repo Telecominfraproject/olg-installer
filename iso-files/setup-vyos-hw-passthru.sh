@@ -33,6 +33,9 @@ apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients virtinst bridg
 echo ">>> Ensuring libvirtd is running..."
 systemctl enable --now libvirtd
 
+echo ">>> Installing Docker..."
+sh /opt/staging_scripts/get-docker.sh
+
 mkdir -p "$IMAGES_DIR"
 
 # Get PCI addresses for interfaces
@@ -129,9 +132,54 @@ done
 # Get VyOS ISO
 if [[ ! -f "$ISO_PATH" ]]; then
   echo ">>> Downloading VyOS ISO to $ISO_PATH"
-  curl -fL $ISO_URL -o $ISO_PATH
+  echo -e "#!/bin/bash\ncurl -fL $ISO_URL -o $ISO_PATH" >download_iso.sh
+  chmod +x download_iso.sh
+  ./download_iso.sh
+  rm -f download_iso.sh
+
+  # Verify SHA256 checksum
+  echo ">>> Verifying SHA256 checksum..."
+  ACTUAL_SHA256=$(sha256sum "$ISO_PATH" | awk '{print $1}')
+  if [[ "$ACTUAL_SHA256" != "$ISO_SHA256" ]]; then
+    echo "ERROR: SHA256 checksum mismatch!"
+    echo "Expected: $ISO_SHA256"
+    echo "Actual:   $ACTUAL_SHA256"
+    echo "Removing corrupted ISO file..."
+    rm -f "$ISO_PATH"
+    exit 1
+  fi
+  echo ">>> SHA256 checksum verified successfully"
 else
   echo ">>> VyOS ISO already present at $ISO_PATH"
+  # Verify SHA256 checksum of existing file
+  echo ">>> Verifying SHA256 checksum of existing ISO..."
+  ACTUAL_SHA256=$(sha256sum "$ISO_PATH" | awk '{print $1}')
+  if [[ "$ACTUAL_SHA256" != "$ISO_SHA256" ]]; then
+    echo "WARNING: SHA256 checksum mismatch for existing ISO!"
+    echo "Expected: $ISO_SHA256"
+    echo "Actual:   $ACTUAL_SHA256"
+    echo "Removing existing ISO and re-downloading..."
+    rm -f "$ISO_PATH"
+    echo -e "#!/bin/bash\ncurl -fL $ISO_URL -o $ISO_PATH" >download_iso.sh
+    chmod +x download_iso.sh
+    ./download_iso.sh
+    rm -f download_iso.sh
+
+    # Verify SHA256 checksum of new download
+    echo ">>> Verifying SHA256 checksum..."
+    ACTUAL_SHA256=$(sha256sum "$ISO_PATH" | awk '{print $1}')
+    if [[ "$ACTUAL_SHA256" != "$ISO_SHA256" ]]; then
+      echo "ERROR: SHA256 checksum mismatch!"
+      echo "Expected: $ISO_SHA256"
+      echo "Actual:   $ACTUAL_SHA256"
+      echo "Removing corrupted ISO file..."
+      rm -f "$ISO_PATH"
+      exit 1
+    fi
+    echo ">>> SHA256 checksum verified successfully"
+  else
+    echo ">>> SHA256 checksum verified successfully"
+  fi
 fi
 
 # Create an ISO with out example config files
