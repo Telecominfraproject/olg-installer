@@ -20,10 +20,10 @@ The result of this will be an ISO in the project working folder.
 - Power back the server
 - Login to the Linux host with username `olgadm` and password `olgadm`
 - Edit `/opt/staging_scripts/setup-config` and adjust the network interface names and if required the VyOS VM sizing parameters
-    - If you will be using the "Standalone mode", you might need to adjust the VyOS rolling release path. Reference: https://github.com/vyos/vyos-nightly-build/releases
-- Run the setup script:
-    - `sudo /opt/staging_scripts/setup-vyos-bridge.sh` to use the network bridge method
-    - `sudo /opt/staging_scripts/setup-vyos-hw-passthru.sh` to use the hardware passthru for the network interfaces (WIP, not tested)
+    - You might need to adjust the VyOS rolling release path. Reference: https://github.com/vyos/vyos-nightly-build/releases
+- Run the setup script (Docker will be installed automatically):
+    - `sudo /opt/staging_scripts/setup-vyos-bridge.sh` to use the network bridge method (recommended)
+    - `sudo /opt/staging_scripts/setup-vyos-hw-passthru.sh` to use the hardware passthru for the network interfaces (WIP)
 - Reboot the host
 - Connect to the VyOS console with `virsh console vyos`
 - Login with username `vyos` and password `vyos`
@@ -85,18 +85,26 @@ Here is how to load this configuration:
 
 - Open a console to the VyOS console with `virsh console vyos`
 - If required login with your credentials
-- Mound the ISO containing the configs
+- Mount the ISO containing the configs
     ```
     sudo mkdir /opt/vyos-configs ; sudo mount /dev/sr1 /opt/vyos-configs
     ```
 - Go in config mode with `config`
 - Load the factory config with:
     ```
-    source /opt/olg-configs/vyos-factory-config
+    source /opt/vyos-configs/vyos-factory-config
     commit
     save
     exit
     ```
+
+## uCentral Cloud Management Setup (Optional)
+
+To connect the OLG to a cloud gateway controller, see:
+- **Quick setup:** [README-Ucentral.md](README-Ucentral.md)
+- **Operational guide:** [docs/OLG_SYSTEM_RESTART_GUIDE.md](docs/OLG_SYSTEM_RESTART_GUIDE.md)
+
+The setup script automatically installs Docker, which is required for running the uCentral client container.
 
 ## Sample UCentral configurations
 
@@ -124,7 +132,3 @@ Use the Shipit CLI (https://gitlab.com/intello/shipit-cli-go)
 This allows you to create the branch and associated PR in one simple command. The branch and PR will use a standardized naming scheme.
 
 ![image](docs/shipit-screenshot.png)
-
-
-
-

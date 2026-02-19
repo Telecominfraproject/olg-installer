@@ -29,12 +29,32 @@ fi
 # Make sure we have netplan available
 command -v netplan >/dev/null 2>&1 || { echo "netplan not found. This script targets Ubuntu with netplan."; exit 1; }
 
-# Make sure we have all the minimum required interfaces
-for IFACE in "$WAN_IF" "$LAN_IF"; do
+# Validate network interface configuration
+echo ">>> Validating network interface configuration..."
+MISSING_IFACES=()
+for IFACE in "$WAN_IF" "$LAN_IF" "$ADMIN_IF"; do
   if ! ip link show "$IFACE" >/dev/null 2>&1; then
-    echo "Interface $IFACE not found. Adjust WAN_IF/LAN_IF in the script."; exit 1
+    MISSING_IFACES+=("$IFACE")
   fi
 done
+
+if [ ${#MISSING_IFACES[@]} -gt 0 ]; then
+  echo ""
+  echo "============================================================================"
+  echo "ERROR: Interface(s) not found: ${MISSING_IFACES[*]}"
+  echo "============================================================================"
+  echo ""
+  echo "Please edit /opt/staging_scripts/setup-config and set correct interface names."
+  echo ""
+  echo "Available interfaces on this system:"
+  ip link show | grep '^[0-9]' | awk '{print "  - " $2}' | sed 's/:$//'
+  echo ""
+  echo "To find interface details, run: ip link show"
+  echo ""
+  exit 1
+fi
+
+echo "[✓] All required interfaces found: WAN=$WAN_IF, LAN=$LAN_IF, ADMIN=$ADMIN_IF"
 
 echo ">>> Set the host hostname"
 /opt/staging_scripts/set-hostname
@@ -182,5 +202,51 @@ virt-install -n "$VM_NAME" \
   --disk /var/lib/libvirt/boot/vyos-configs.iso,device=cdrom \
   --noautoconsole
 
-# Set the VM o autostart on host boot
+# Set the VM to autostart on host boot
 virsh autostart $VM_NAME
+
+echo ">>> Setting up uCentral persistent directories..."
+# Note: Only config directories needed - .uc files are now in Docker image (ucentral-client:olgV6)
+mkdir -p /opt/ucentral-persistent/{config,config-shadow,ucentral}
+
+echo ">>> Setting permissions..."
+chown -R root:root /opt/ucentral-persistent
+chmod -R 755 /opt/ucentral-persistent
+
+echo "[✓] uCentral persistent directories created"
+echo "    Note: .uc integration files are now in Docker image ucentral-client:olgV6"
+
+echo ">>> VyOS API configuration setup..."
+echo ""
+echo "NOTE: VyOS IP auto-detection cannot run from the OLG host because the host"
+echo "      does not have an IP on br-wan (it's just a bridge). The ucentral-setup.sh"
+echo "      script will detect and update the VyOS IP automatically when you run it."
+echo ""
+echo "You must manually create vyos-info.json BEFORE running ucentral-setup.sh:"
+echo ""
+echo "Steps to create vyos-info.json:"
+echo "  1. After VyOS installation, connect to console: sudo virsh console vyos"
+echo "  2. Check VyOS WAN IP with: show interfaces"
+echo "  3. Create vyos-info.json with the VyOS IP:"
+echo ""
+echo "     echo '{\"host\":\"https://VYOS_WAN_IP\",\"port\":443,\"key\":\"MY-HTTPS-API-PLAINTEXT-KEY\"}' | sudo tee /opt/ucentral-persistent/ucentral/vyos-info.json"
+echo ""
+echo "  4. When you run ucentral-setup.sh, it will auto-update the IP if VyOS address changes"
+echo ""
+
+echo ""
+echo "======================================================================"
+echo "VyOS VM setup complete!"
+echo "======================================================================"
+echo ""
+echo "Next steps:"
+echo "  1. Reboot the host: sudo reboot"
+echo "  2. After reboot, connect to VyOS console: sudo virsh console vyos"
+echo "  3. Login with: vyos / vyos"
+echo "  4. Install VyOS: install image (follow prompts, use defaults)"
+echo "  5. Reboot VyOS: reboot"
+echo "  6. If VM doesn't restart, manually start it: sudo virsh start vyos"
+echo "  7. Load factory config (see README.md for details)"
+echo ""
+echo "For uCentral cloud management setup, see README-Ucentral.md"
+echo "======================================================================"
