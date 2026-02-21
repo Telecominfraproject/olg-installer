@@ -25,6 +25,17 @@ Use VM mode when:
 - Need SSH access to VyOS from OLG host
 - Upstream network provides DHCP (e.g., Mac Internet Sharing)
 
+## Prerequisites
+
+**CRITICAL:** The OLG requires the **RouterArchitects custom VyOS ISO**, not the standard VyOS ISO. The RouterArchitects ISO includes enhanced REST API support with the `/config-file` endpoint required for cloud configuration push.
+
+The `setup-config` file is already configured with the correct ISO URL:
+```bash
+ISO_URL="https://github.com/RouterArchitects/vyos-rolling-build/releases/download/v1.5.0-RC-20251213-0020/vyos-1.5-rolling-202512130020-generic-amd64.iso"
+```
+
+**Do not change this URL** - the standard VyOS ISO lacks the REST API extensions needed for uCentral integration.
+
 ## Installation Steps
 
 ### 1. Configure Platform Mode
@@ -91,9 +102,31 @@ sudo virsh start vyos
 sudo virsh console vyos  # Serial console now works!
 ```
 
-### 6. Load Factory Configuration
+### 6. Configure VyOS for Cloud Management
+
+**IMPORTANT:** Use minimal configuration for cloud management. DO NOT load factory config as it conflicts with cloud-driven configurations.
+
+**Option A: Minimal Configuration (Recommended for Cloud Management)**
 
 From VyOS console or SSH:
+
+```bash
+configure
+set interfaces ethernet eth0 address dhcp
+set interfaces ethernet eth0 description WAN
+set service https api
+set service https api keys id ucentral key 'MY-HTTPS-API-PLAINTEXT-KEY'
+set service https api rest
+commit
+save
+exit
+```
+
+**Critical:** The `set service https api rest` line is REQUIRED. Without it, VyOS only exposes the `/info` endpoint. The `rest` keyword enables the full REST API including `/config-file`, `/configure`, `/retrieve`, and `/show` endpoints needed for cloud configuration push.
+
+**Option B: Factory Configuration (Only for Standalone/Testing)**
+
+If NOT using cloud management, you can load the factory config:
 
 ```bash
 configure
@@ -103,6 +136,8 @@ commit
 save
 exit
 ```
+
+**Note:** Factory config sets up a complete 3-VLAN router configuration which will conflict with cloud-pushed configs. Only use this for standalone testing without cloud integration.
 
 ### 7. Create vyos-info.json
 
