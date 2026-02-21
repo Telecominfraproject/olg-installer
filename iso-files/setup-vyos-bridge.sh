@@ -29,12 +29,32 @@ fi
 # Make sure we have netplan available
 command -v netplan >/dev/null 2>&1 || { echo "netplan not found. This script targets Ubuntu with netplan."; exit 1; }
 
-# Make sure we have all the minimum required interfaces
-for IFACE in "$WAN_IF" "$LAN_IF"; do
+# Validate network interface configuration
+echo ">>> Validating network interface configuration..."
+MISSING_IFACES=()
+for IFACE in "$WAN_IF" "$LAN_IF" "$ADMIN_IF"; do
   if ! ip link show "$IFACE" >/dev/null 2>&1; then
-    echo "Interface $IFACE not found. Adjust WAN_IF/LAN_IF in the script."; exit 1
+    MISSING_IFACES+=("$IFACE")
   fi
 done
+
+if [ ${#MISSING_IFACES[@]} -gt 0 ]; then
+  echo ""
+  echo "============================================================================"
+  echo "ERROR: Interface(s) not found: ${MISSING_IFACES[*]}"
+  echo "============================================================================"
+  echo ""
+  echo "Please edit /opt/staging_scripts/setup-config and set correct interface names."
+  echo ""
+  echo "Available interfaces on this system:"
+  ip link show | grep '^[0-9]' | awk '{print "  - " $2}' | sed 's/:$//'
+  echo ""
+  echo "To find interface details, run: ip link show"
+  echo ""
+  exit 1
+fi
+
+echo "[✓] All required interfaces found: WAN=$WAN_IF, LAN=$LAN_IF, ADMIN=$ADMIN_IF"
 
 echo ">>> Set the host hostname"
 /opt/staging_scripts/set-hostname
@@ -171,7 +191,8 @@ echo ">>> Creating VyOS VM '$VM_NAME'..."
 virt-install -n "$VM_NAME" \
   --cpu host --ram "$RAM_MB" \
   --vcpus "$VCPUS" \
-  --cdrom "$ISO_PATH" \
+  --boot cdrom,hd \
+  --disk path="$ISO_PATH",device=cdrom,bus=sata,readonly=on \
   --os-variant debian12 \
   --network bridge="$BR_WAN",model=virtio \
   --network bridge="$BR_LAN",model=virtio \
@@ -179,8 +200,81 @@ virt-install -n "$VM_NAME" \
   --hvm \
   --virt-type kvm \
   --disk path="$DISK_PATH",bus=virtio,size="$DISK_GB" \
-  --disk /var/lib/libvirt/boot/vyos-configs.iso,device=cdrom \
+  --disk path=/var/lib/libvirt/boot/vyos-configs.iso,device=cdrom,bus=sata,readonly=on \
   --noautoconsole
 
-# Set the VM o autostart on host boot
+# Set the VM to autostart on host boot
 virsh autostart $VM_NAME
+
+echo ">>> Setting up uCentral persistent directories..."
+# Note: Only config directories needed - .uc files are now in Docker image (ucentral-client:olgV6)
+mkdir -p /opt/ucentral-persistent/{config,config-shadow,ucentral}
+
+echo ">>> Setting permissions..."
+chown -R root:root /opt/ucentral-persistent
+chmod -R 755 /opt/ucentral-persistent
+
+echo "[✓] uCentral persistent directories created"
+echo "    Note: .uc integration files are now in Docker image ucentral-client:olgV6"
+
+echo ">>> VyOS API configuration setup..."
+echo ""
+if [[ "${OLG_ISO_PLATFORM}" == "VM" ]]; then
+  echo "NOTE: Running in VM mode - br-wan has DHCP enabled and will get an IP."
+  echo "      VyOS will also get an IP via DHCP on the same network."
+  echo "      You can find VyOS IP with: ip neigh show dev br-wan"
+  echo "      Or use: sudo tcpdump -i br-wan -n to watch for VyOS traffic"
+else
+  echo "NOTE: VyOS IP auto-detection cannot run from the OLG host because the host"
+  echo "      does not have an IP on br-wan (it's just a bridge)."
+fi
+echo ""
+echo "You must manually create vyos-info.json BEFORE running ucentral-setup.sh:"
+echo ""
+echo "Steps to create vyos-info.json:"
+if [[ "${OLG_ISO_PLATFORM}" == "VM" ]]; then
+  echo "  1. After VyOS installation, find VyOS IP: ip neigh show dev br-wan"
+  echo "  2. SSH to VyOS: ssh vyos@<VYOS_IP> (password: vyos)"
+  echo "  3. Check interfaces: show interfaces"
+  echo "  4. Create vyos-info.json with the VyOS IP:"
+else
+  echo "  1. After VyOS installation, connect to console: sudo virsh console vyos"
+  echo "  2. Check VyOS WAN IP with: show interfaces"
+  echo "  3. Create vyos-info.json with the VyOS IP:"
+fi
+echo ""
+echo "     echo '{\"host\":\"https://VYOS_WAN_IP\",\"port\":443,\"key\":\"MY-HTTPS-API-PLAINTEXT-KEY\"}' | sudo tee /opt/ucentral-persistent/ucentral/vyos-info.json"
+echo ""
+
+echo ""
+echo "======================================================================"
+echo "VyOS VM setup complete!"
+echo "======================================================================"
+echo ""
+if [[ "${OLG_ISO_PLATFORM}" == "VM" ]]; then
+  echo "Next steps (VM mode):"
+  echo "  1. Wait for VyOS to boot (~30 seconds)"
+  echo "  2. Find VyOS IP: ip neigh show dev br-wan"
+  echo "  3. SSH to VyOS: ssh vyos@<VYOS_IP> (password: vyos)"
+  echo "  4. Install VyOS to disk: install image"
+  echo "     - Choose 'S' for Serial console when prompted"
+  echo "     - Use option '2' (default config) for boot config"
+  echo "  5. Reboot VyOS: reboot"
+  echo "  6. If VM doesn't restart, manually start: sudo virsh start vyos"
+  echo "  7. Connect via serial console: sudo virsh console vyos"
+  echo "  8. Load factory config (see README.md for details)"
+else
+  echo "Next steps (BAREMETAL mode):"
+  echo "  1. Reboot the host: sudo reboot"
+  echo "  2. After reboot, connect to VyOS console: sudo virsh console vyos"
+  echo "  3. Login with: vyos / vyos"
+  echo "  4. Install VyOS: install image"
+  echo "     - Choose 'S' for Serial console when prompted"
+  echo "     - Use option '2' (default config) for boot config"
+  echo "  5. Reboot VyOS: reboot"
+  echo "  6. If VM doesn't restart, manually start it: sudo virsh start vyos"
+  echo "  7. Load factory config (see README.md for details)"
+fi
+echo ""
+echo "For uCentral cloud management setup, see README-Ucentral.md"
+echo "======================================================================"

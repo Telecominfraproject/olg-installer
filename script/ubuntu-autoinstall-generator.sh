@@ -294,17 +294,8 @@ cp -r iso-files/* $tmpdir/olg_files/
 cp grub.cfg $tmpdir/boot/grub/grub.cfg
 
 # Customize some files
-source iso-files/setup-config
-sed -i -e "s/{{ HOST_ADMIN_PORT }}/${ADMIN_IF}/" "$tmpdir/olg_files/01-dhcp-host-admin.yaml"
 ISO_VERSION=`cat grub.cfg | grep "ISO_VERSION=" | cut -f 2 -d '"'`
 sed -i -e "s/{{ ISO_VERSION }}/${ISO_VERSION}/" "$tmpdir/olg_files/user-data.olg"
-
-# If we have an Intel AMT port it must be set in DHCP or at least up fo AMT to work
-if [ ! -z "${INTEL_AMT_PORT}" ]; then
-        echo "    ${INTEL_AMT_PORT}:  # Intel AMT Port" >>$tmpdir/olg_files/01-dhcp-host-admin.yaml
-        echo "      dhcp4: true" >>$tmpdir/olg_files/01-dhcp-host-admin.yaml
-        echo "      dhcp6: false" >>$tmpdir/olg_files/01-dhcp-host-admin.yaml
-fi
 
 if [ ${md5_checksum} -eq 1 ]; then
         log "👷 Updating $tmpdir/md5sum.txt with hashes of modified files..."

@@ -1,6 +1,11 @@
 network:
   version: 2
   ethernets:
-    {{ HOST_ADMIN_PORT }}: # Admin port
+    admin-interface:
+      match:
+        name: "enp*7s0"
       dhcp4: true
       dhcp6: false
+      optional: true
+      dhcp4-overrides:
+        route-metric: 200
