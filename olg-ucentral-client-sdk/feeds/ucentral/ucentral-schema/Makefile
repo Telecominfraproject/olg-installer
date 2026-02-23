@@ -4,10 +4,10 @@ PKG_NAME:=ucentral-schema
 PKG_RELEASE:=1
 
 PKG_SOURCE_URL=https://github.com/Telecominfraproject/olg-ucentral-schema.git
-PKG_MIRROR_HASH:=e88c0ab7f89e658c1b483303e52a3772933d5da9c370f750fcb91ebbef44d00d
+PKG_MIRROR_HASH:=skip
 PKG_SOURCE_PROTO:=git
-PKG_SOURCE_DATE:=2026-01-15
-PKG_SOURCE_VERSION:=53cba9a294aef3dcaf002dfa6c7d5ac50e93184d
+PKG_SOURCE_DATE:=2026-02-23
+PKG_SOURCE_VERSION:=1fa74efc52f614c716f151d45a8647e6a0d1f8d2
 PKG_MAINTAINER:=John Crispin <john@phrozen.org>
 PKG_LICENSE:=BSD-3-Clause
 
@@ -39,6 +39,8 @@ define Package/ucentral-schema/install
 	$(CP) $(PKG_BUILD_DIR)/system/*.uc $(1)/usr/share/ucentral
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/system/wifi_detect.sh $(1)/usr/share/ucentral
 	$(CP) ./files/* $(1)
+	$(RM) $(1)/usr/share/ucentral/state.uc
+	$(LN) vyos/state.uc $(1)/usr/share/ucentral/state.uc
 endef
 
 define Package/ucentral-recovery/install
