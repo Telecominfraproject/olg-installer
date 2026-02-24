@@ -38,7 +38,34 @@ At this time you can either load a default configuration and use VyOS in a "stan
 
 ### OpenWifi Cloud SDK mode
 
-### Setup of Ucentral-Client Container
+#### VyOS Minimal Configuration
+
+Before setting up the uCentral client, configure VyOS with minimal settings required for cloud management:
+
+```
+configure
+
+# Enable DHCP on WAN interface (br0)
+set interfaces bridge br0 address dhcp
+
+# Enable HTTPS API service
+set service https
+
+# Enable REST API endpoint (required for uCentral configuration management)
+# The REST endpoint allows the uCentral client to push configurations via API
+set service https api rest
+
+# Set API key (use a secure key in production)
+set service https api keys id ucentral key 'MY-HTTPS-API-PLAINTEXT-KEY'
+
+commit
+save
+exit
+```
+
+**Note on REST API**: The `rest` endpoint is required because uCentral uses the `/config-file` API to push complete configurations in a single transaction. Without REST enabled, the API will reject configuration requests. The API key set here must match the `key` value in `/etc/ucentral/vyos-info.json` inside the ucentral-olg container.
+
+#### Setup of Ucentral-Client Container
 
 - SSH to the OLG Ubuntu host
 - Run `sudo /opt/staging_scripts/ucentral-setup.sh setup` to setup the ucentral-client container
