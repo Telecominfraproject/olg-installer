@@ -51,6 +51,16 @@ return{
             payloadObj.path = [];
         }
 
+    } else if (op == "show") {
+        endpoint = "/show";
+
+        if (op_arg && op_arg.path) {
+            payloadObj.path = op_arg.path;
+        } else {
+            // default: empty path
+            payloadObj.path = [];
+        }
+
     } else {
         fprintf(stderr, "Unsupported op: %s\n", op);
         return null;
@@ -63,7 +73,7 @@ return{
     // Build the curl command
     let cmd = sprintf(
         "curl -skL --connect-timeout 3 -m 5 -X POST %s " +
-        "--form-string data=%s --form key=%s",
+        "--form data=%s --form key=%s",
         quoteForShell(url),
         quoteForShell(payloadStr),
         quoteForShell(key)
