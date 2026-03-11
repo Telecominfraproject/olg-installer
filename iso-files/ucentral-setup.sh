@@ -5,7 +5,7 @@ ACTION="$1"
 
 # ================= CONFIG =================
 CONTAINER="ucentral-olg"
-IMAGE="routerarchitect123/ucentral-client:olgV5"
+IMAGE="mjhnetexp/ucentral-client:olgV8"
 
 BRIDGE="br-wan"
 
