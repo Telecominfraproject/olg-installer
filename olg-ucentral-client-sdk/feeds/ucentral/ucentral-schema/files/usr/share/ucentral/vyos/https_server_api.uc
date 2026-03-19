@@ -29,10 +29,12 @@ return{
     let endpoint;
     let payloadObj = { op: op };
 
-    if (op == "load" || op == "merge") {
+    if (op == "load" || op == "merge" || op == "save") {
         endpoint = "/config-file";
 
-        if (op_arg && op_arg.file) {
+        if (op == "save") {
+            // save operation doesn't need file or string
+        } else if (op_arg && op_arg.file) {
             payloadObj.file = op_arg.file;
         } else if (op_arg && op_arg.string) {
             payloadObj.string = op_arg.string;
@@ -59,6 +61,21 @@ return{
         } else {
             // default: empty path
             payloadObj.path = [];
+        }
+
+    } else if (op == "set" || op == "delete") {
+        endpoint = "/configure";
+
+        if (op_arg && op_arg.path) {
+            payloadObj.path = op_arg.path;
+        } else {
+            fprintf(stderr, "Missing path for op %s\n", op);
+            return null;
+        }
+
+        // For 'set', we may have a value
+        if (op == "set" && op_arg.value != null) {
+            payloadObj.value = op_arg.value;
         }
 
     } else {
